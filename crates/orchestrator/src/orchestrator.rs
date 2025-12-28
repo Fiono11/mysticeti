@@ -15,13 +15,14 @@ use crate::{
     display,
     ensure,
     error::{TestbedError, TestbedResult},
+    executor::Executor,
     faults::CrashRecoverySchedule,
     logs::LogsAnalyzer,
     measurements::{Measurement, MeasurementsCollection},
     monitor::Monitor,
     protocol::{ProtocolCommands, ProtocolMetrics},
-    settings::Settings,
-    ssh::{CommandContext, CommandStatus, SshConnectionManager},
+    settings::{CloudProvider, Settings},
+    ssh::{CommandContext, CommandStatus},
 };
 
 /// An orchestrator to deploy nodes and run benchmarks on a testbed.
@@ -35,8 +36,8 @@ pub struct Orchestrator<P> {
     /// Protocol-specific commands generator to generate the protocol configuration files,
     /// boot clients and nodes, etc.
     protocol_commands: P,
-    /// Handle ssh connections to instances.
-    ssh_manager: SshConnectionManager,
+    /// Handle command execution on instances (SSH or local).
+    executor: Executor,
     /// Skip the testbed update. Setting this value to true is dangerous and may lead to
     /// unexpected behavior.
     skip_testbed_update: bool,
@@ -52,14 +53,14 @@ impl<P> Orchestrator<P> {
         instances: Vec<Instance>,
         instance_setup_commands: Vec<String>,
         protocol_commands: P,
-        ssh_manager: SshConnectionManager,
+        executor: Executor,
     ) -> Self {
         Self {
             settings,
             instances,
             instance_setup_commands,
             protocol_commands,
-            ssh_manager,
+            executor,
             skip_testbed_update: false,
             skip_testbed_configuration: false,
         }
@@ -208,7 +209,7 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
 
         let active = self.instances.iter().filter(|x| x.is_active()).cloned();
         let context = CommandContext::default();
-        self.ssh_manager.execute(active, command, context).await?;
+        self.executor.execute(active, command, context).await?;
 
         display::done();
         Ok(())
@@ -237,12 +238,12 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
         let context = CommandContext::new()
             .run_background(id.into())
             .with_execute_from_path(repo_name.into());
-        self.ssh_manager
+        self.executor
             .execute(active.clone(), command, context)
             .await?;
 
         // Wait until the command finished running.
-        self.ssh_manager
+        self.executor
             .wait_for_command(active, id, CommandStatus::Terminated)
             .await?;
 
@@ -271,20 +272,47 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
 
         let id = "configure";
         let repo_name = self.settings.repository_name();
-        let context = CommandContext::new()
-            .run_background(id.into())
-            .with_log_file(format!("~/{id}.log").into())
-            .with_execute_from_path(repo_name.into());
+        
+        // For local execution, only run on the first instance since all instances are the same machine
         let mut instances = nodes;
         if parameters.settings.dedicated_clients != 0 {
             instances.extend(clients);
         };
+        
+        // Kill any existing configure session first (only need to do this once for local execution)
+        let kill_command = format!("(tmux kill-session -t {id} || true)");
+        let kill_context = CommandContext::default();
+        if matches!(self.settings.cloud_provider, CloudProvider::Local) {
+            // For local execution, only kill once since all instances are the same machine
+            if let Some(first_instance) = instances.first() {
+                self.executor
+                    .execute(std::iter::once(first_instance.clone()), kill_command, kill_context)
+                    .await?;
+            }
+        } else {
+            // For cloud execution, kill on all instances
+            self.executor
+                .execute(instances.iter().cloned(), kill_command, kill_context)
+                .await?;
+        }
+        
+        let context = CommandContext::new()
+            .run_background(id.into())
+            .with_log_file(format!("~/{id}.log").into())
+            .with_execute_from_path(repo_name.into());
+        
+        // For local execution, only execute on first instance to avoid duplicate tmux sessions
+        let instances_to_use: Vec<_> = if matches!(self.settings.cloud_provider, CloudProvider::Local) {
+            instances.into_iter().take(1).collect()
+        } else {
+            instances
+        };
 
-        self.ssh_manager
-            .execute(instances.clone(), command, context)
+        self.executor
+            .execute(instances_to_use.clone(), command, context)
             .await?;
-        self.ssh_manager
-            .wait_for_command(instances, id, CommandStatus::Terminated)
+        self.executor
+            .wait_for_command(instances_to_use, id, CommandStatus::Terminated)
             .await?;
 
         Ok(())
@@ -307,7 +335,7 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
         // Execute the deletion on all machines.
         let active = self.instances.iter().filter(|x| x.is_active()).cloned();
         let context = CommandContext::default();
-        self.ssh_manager.execute(active, command, context).await?;
+        self.executor.execute(active, command, context).await?;
 
         display::done();
         Ok(())
@@ -319,7 +347,7 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
         if let Some(instance) = instance {
             display::action("Configuring monitoring instance");
 
-            let monitor = Monitor::new(instance, clients, nodes, self.ssh_manager.clone());
+            let monitor = Monitor::new(instance, clients, nodes, self.executor.clone());
             let commands = &self.protocol_commands;
             monitor.start_prometheus(commands, parameters).await?;
             monitor.start_grafana().await?;
@@ -343,19 +371,41 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
             .node_command(instances.clone(), parameters);
 
         let repo = self.settings.repository_name();
-        let context = CommandContext::new()
-            .run_background("node".into())
-            .with_log_file("~/node.log".into())
-            .with_execute_from_path(repo.into());
-        self.ssh_manager
-            .execute_per_instance(targets, context)
-            .await?;
+        
+        // For local execution, use unique session names per instance to avoid conflicts
+        // For cloud execution, use the same session name since instances are separate machines
+        let is_local = matches!(self.settings.cloud_provider, CloudProvider::Local);
+        
+        if is_local {
+            // For local execution, execute each node with a unique session name
+            for (i, (instance, command)) in targets.into_iter().enumerate() {
+                let session_name = format!("node-{}", i);
+                let log_file = format!("~/node-{}.log", i);
+                let context = CommandContext::new()
+                    .run_background(session_name)
+                    .with_log_file(log_file.into())
+                    .with_execute_from_path(repo.clone().into());
+                
+                self.executor
+                    .execute_per_instance(std::iter::once((instance, command)), context)
+                    .await?;
+            }
+        } else {
+            // For cloud execution, use the same session name for all
+            let context = CommandContext::new()
+                .run_background("node".into())
+                .with_log_file("~/node.log".into())
+                .with_execute_from_path(repo.into());
+            self.executor
+                .execute_per_instance(targets, context)
+                .await?;
+        }
 
         // Wait until all nodes are reachable.
         let commands = self
             .protocol_commands
             .nodes_metrics_command(instances.clone(), parameters);
-        self.ssh_manager.wait_for_success(commands).await;
+        self.executor.wait_for_success(commands).await;
 
         Ok(())
     }
@@ -396,7 +446,7 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
             .run_background("client".into())
             .with_log_file("~/client.log".into())
             .with_execute_from_path(repo.into());
-        self.ssh_manager
+        self.executor
             .execute_per_instance(targets, context)
             .await?;
 
@@ -404,7 +454,7 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
         let commands = self
             .protocol_commands
             .clients_metrics_command(clients, parameters);
-        self.ssh_manager.wait_for_success(commands).await;
+        self.executor.wait_for_success(commands).await;
 
         display::done();
         Ok(())
@@ -450,7 +500,7 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
                     instances.retain(|(instance, _)| !killed_nodes.contains(instance));
 
                     let stdio = self
-                        .ssh_manager
+                        .executor
                         .execute_per_instance(instances, CommandContext::default())
                         .await?;
 
@@ -477,7 +527,20 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
                     let action = faults_schedule.update();
                     if !action.kill.is_empty() {
                         killed_nodes.extend(action.kill.clone());
-                        self.ssh_manager.kill(action.kill.clone(), "node").await?;
+                        // For local execution, we need to find the index of each instance in the original nodes list
+                        // to determine the correct session name. For now, kill all node-* sessions.
+                        if matches!(self.settings.cloud_provider, CloudProvider::Local) {
+                            // Kill all node sessions (node-0, node-1, etc.) - this is safe since we're killing specific instances
+                            for i in 0..action.kill.len() {
+                                let session_name = format!("node-{}", i);
+                                // Try to kill each session - some might not exist, which is fine
+                                let _ = self.executor.kill(action.kill.iter().take(1).cloned(), &session_name).await;
+                            }
+                            // Also kill the generic "node" session in case it exists
+                            let _ = self.executor.kill(action.kill.clone(), "node").await;
+                        } else {
+                            self.executor.kill(action.kill.clone(), "node").await?;
+                        }
                     }
                     if !action.boot.is_empty() {
                         // Monitor not yet supported for this
@@ -523,7 +586,7 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
         for (i, instance) in clients.iter().enumerate() {
             display::status(format!("{}/{}", i + 1, clients.len()));
 
-            let connection = self.ssh_manager.connect(instance.ssh_address()).await?;
+            let connection = self.executor.connect(instance.ssh_address()).await?;
             let client_log_content = connection.download("client.log")?;
 
             let client_log_file = [path.clone(), format!("client-{i}.log").into()]
@@ -542,7 +605,7 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
         for (i, instance) in nodes.iter().enumerate() {
             display::status(format!("{}/{}", i + 1, nodes.len()));
 
-            let connection = self.ssh_manager.connect(instance.ssh_address()).await?;
+            let connection = self.executor.connect(instance.ssh_address()).await?;
             let node_log_content = connection.download("node.log")?;
 
             let node_log_file = [path.clone(), format!("node-{i}.log").into()]
@@ -575,9 +638,42 @@ impl<P: ProtocolCommands + ProtocolMetrics> Orchestrator<P> {
         self.cleanup(true).await?;
 
         // Update the software on all instances.
-        if !self.skip_testbed_update {
+        // Skip install/update for local execution (user's environment is already set up)
+        if !self.skip_testbed_update && !matches!(self.settings.cloud_provider, CloudProvider::Local) {
             self.install().await?;
             self.update().await?;
+        } else if matches!(self.settings.cloud_provider, CloudProvider::Local) {
+            display::action("Setting up local environment");
+            // For local execution, just ensure the working directory exists and clone the repo if needed
+            let working_dir = self.settings.working_dir.display();
+            let url = &self.settings.repository.url;
+            let repo_name = self.settings.repository_name();
+            let repo_path = format!("{}/{}", working_dir, repo_name);
+            
+            // Setup working directory and clone repo
+            let setup_command = format!(
+                "mkdir -p {working_dir} && (test -d {repo_path} || git clone {url} {repo_path})"
+            );
+            
+            let active: Vec<_> = self.instances.iter().filter(|x| x.is_active()).cloned().collect();
+            let context = CommandContext::default();
+            self.executor.execute(active.iter().cloned(), setup_command, context.clone()).await?;
+            
+            // Build the binary if it doesn't exist
+            display::action("Building binary (if needed)");
+            let commit = &self.settings.repository.commit;
+            // Build command - wrap in subshell to handle log redirection properly
+            let build_command = format!(
+                "{{ cd {repo_path} && \
+                 (git fetch origin {commit} 2>/dev/null || true) && \
+                 (git checkout -b {commit} 2>/dev/null || git checkout -f origin/{commit} 2>/dev/null || git checkout -f {commit} 2>/dev/null || true) && \
+                 (test -f target/release/mysticeti || (source $HOME/.cargo/env 2>/dev/null || true; RUSTFLAGS=-Ctarget-cpu=native cargo build --release --bin mysticeti)); }}"
+            );
+            
+            // Don't use log file redirection for build command to avoid shell syntax issues
+            let build_context = CommandContext::default();
+            self.executor.execute(active, build_command, build_context).await?;
+            display::done();
         }
 
         // Run all benchmarks.

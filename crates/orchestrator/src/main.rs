@@ -7,8 +7,10 @@ use std::path::PathBuf;
 
 use benchmark::BenchmarkParameters;
 use clap::Parser;
-use client::{aws::AwsClient, vultr::VultrClient, ServerProviderClient};
+use client::{aws::AwsClient, local::LocalClient, vultr::VultrClient, ServerProviderClient};
 use eyre::Context;
+use executor::Executor;
+use local_executor::LocalCommandExecutor;
 use measurements::MeasurementsCollection;
 use orchestrator::Orchestrator;
 use protocol::ProtocolParameters;
@@ -20,7 +22,9 @@ mod benchmark;
 mod client;
 mod display;
 mod error;
+mod executor;
 mod faults;
+mod local_executor;
 mod logs;
 mod measurements;
 mod monitor;
@@ -157,6 +161,13 @@ async fn main() -> eyre::Result<()> {
             // Execute the command.
             run(settings, client, opts).await
         }
+        CloudProvider::Local => {
+            // Create the local client for running benchmarks locally.
+            let client = LocalClient::new();
+
+            // Execute the command.
+            run(settings, client, opts).await
+        }
     }
 }
 
@@ -204,14 +215,41 @@ async fn run<C: ServerProviderClient>(
             skip_testbed_update,
             skip_testbed_configuration,
         } => {
-            // Create a new orchestrator to instruct the testbed.
-            let username = testbed.username();
-            let private_key_file = settings.ssh_private_key_file.clone();
-            let ssh_manager = SshConnectionManager::new(username.into(), private_key_file)
-                .with_timeout(settings.ssh_timeout)
-                .with_retries(settings.ssh_retries);
+            // Create the appropriate executor based on cloud provider.
+            let executor = match &settings.cloud_provider {
+                CloudProvider::Local => {
+                    // For local execution, use direct command execution
+                    let working_dir = settings.working_dir.clone();
+                    Executor::local(LocalCommandExecutor::new(working_dir))
+                }
+                _ => {
+                    // For cloud providers, use SSH
+                    let username = testbed.username();
+                    let private_key_file = settings.ssh_private_key_file.clone();
+                    let ssh_manager = SshConnectionManager::new(username.into(), private_key_file)
+                        .with_timeout(settings.ssh_timeout)
+                        .with_retries(settings.ssh_retries);
+                    Executor::ssh(ssh_manager)
+                }
+            };
 
-            let instances = testbed.instances();
+            let mut instances = testbed.instances();
+
+            // For local execution, auto-create instances if none exist
+            if instances.is_empty() && matches!(settings.cloud_provider, CloudProvider::Local) {
+                display::action("No instances found, creating local instances automatically");
+                let needed_instances = committee
+                    + settings.dedicated_clients
+                    + if settings.monitoring { 1 } else { 0 };
+                // Create a few extra instances to have some buffer
+                let instances_to_create = (needed_instances + 2).max(4);
+                testbed
+                    .deploy(instances_to_create, None)
+                    .await
+                    .wrap_err("Failed to auto-create local instances")?;
+                instances = testbed.instances();
+                display::done();
+            }
 
             let setup_commands = testbed
                 .setup_commands()
@@ -245,7 +283,7 @@ async fn run<C: ServerProviderClient>(
                 instances,
                 setup_commands,
                 protocol_commands,
-                ssh_manager,
+                executor,
             )
             .skip_testbed_update(skip_testbed_update)
             .skip_testbed_configuration(skip_testbed_configuration)

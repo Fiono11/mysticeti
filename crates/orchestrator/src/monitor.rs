@@ -7,15 +7,16 @@ use crate::{
     benchmark::BenchmarkParameters,
     client::Instance,
     error::{MonitorError, MonitorResult},
+    executor::Executor,
     protocol::ProtocolMetrics,
-    ssh::{CommandContext, SshConnectionManager},
+    ssh::CommandContext,
 };
 
 pub struct Monitor {
     instance: Instance,
     clients: Vec<Instance>,
     nodes: Vec<Instance>,
-    ssh_manager: SshConnectionManager,
+    executor: Executor,
 }
 
 impl Monitor {
@@ -24,13 +25,13 @@ impl Monitor {
         instance: Instance,
         clients: Vec<Instance>,
         nodes: Vec<Instance>,
-        ssh_manager: SshConnectionManager,
+        executor: Executor,
     ) -> Self {
         Self {
             instance,
             clients,
             nodes,
-            ssh_manager,
+            executor,
         }
     }
 
@@ -57,7 +58,7 @@ impl Monitor {
             protocol_commands,
             parameters,
         );
-        self.ssh_manager
+        self.executor
             .execute(instance, commands, CommandContext::default())
             .await?;
 
@@ -69,7 +70,7 @@ impl Monitor {
         // Configure and reload grafana.
         let instance = std::iter::once(self.instance.clone());
         let commands = Grafana::setup_commands();
-        self.ssh_manager
+        self.executor
             .execute(instance, commands, CommandContext::default())
             .await?;
 

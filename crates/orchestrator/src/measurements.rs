@@ -216,10 +216,43 @@ impl MeasurementsCollection {
     }
 
     /// Aggregate the tps of multiple data points.
+    /// TPS is computed as: total_transactions / actual_processing_time
+    /// where actual_processing_time is the time from first transaction submission to last confirmation,
+    /// not the total benchmark duration (which includes setup/ramp-up time).
     pub fn aggregate_tps(&self, label: &Label) -> u64 {
-        self.max_result(label, |x| x.count)
-            .checked_div(self.max_result(label, |x| x.timestamp.as_secs_f64() as usize))
-            .unwrap_or_default() as u64
+        let all_measurements = self.all_measurements(label);
+
+        // Get the last measurement (when the last transaction was confirmed)
+        let last_measurement = self.max_result(label, |x| x.timestamp);
+        let max_count = self.max_result(label, |x| x.count);
+
+        if max_count == 0 {
+            return 0;
+        }
+
+        // Find the minimum estimated submission time across all measurements
+        // For each measurement, estimate submission time = confirmation time - average latency
+        // The minimum of these gives us the best estimate of when the first transaction was submitted
+        let first_submission_time = all_measurements
+            .iter()
+            .flat_map(|series| series.iter())
+            .filter(|m| m.count > 0)
+            .map(|m| {
+                let avg_latency = m.average_latency();
+                m.timestamp.saturating_sub(avg_latency)
+            })
+            .min()
+            .unwrap_or_default();
+
+        // Calculate actual processing time: from first transaction submission to last confirmation
+        let processing_time = last_measurement.saturating_sub(first_submission_time);
+
+        // Avoid division by zero
+        if processing_time.as_secs() == 0 {
+            return 0;
+        }
+
+        (max_count as f64 / processing_time.as_secs_f64()) as u64
     }
 
     /// Aggregate the average latency of multiple data points by taking the average.

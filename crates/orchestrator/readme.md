@@ -2,6 +2,22 @@
 
 The Orchestrator crate provides facilities for quickly deploying and benchmarking this codebase in a geo-distributed environment. Please note that it is not intended for production deployments or as an indicator of production engineering best practices. Its purpose is to facilitate research projects by allowing benchmarking of (variants of) the codebase and analyzing performance.
 
+## Running Locally
+
+You can run benchmarks locally on your machine without cloud instances. **No SSH setup is required** - commands are executed directly on your local machine. See [LOCAL_SETUP.md](./LOCAL_SETUP.md) for detailed instructions.
+
+**Quick start for local execution:**
+1. Copy `assets/settings-local.yml` to `assets/settings.yml` and configure it
+2. Run benchmark: `cargo run --bin orchestrator -- benchmark --committee 4 --loads 200`
+   (Instances are created automatically - no deploy step needed!)
+
+**Note:** If you see "zsh: event not found" errors, it's because zsh interprets `!` in comments. You can either:
+- Remove the `!` from comments, or
+- Run `set +H` to disable history expansion, or  
+- Escape the `!` with a backslash: `\!`
+
+## Cloud Deployment
+
 This guide provides a step-by-step explanation of how to run geo-distributed benchmarks on either [Vultr](http://vultr.com) or [Amazon Web Services (AWS)](http://aws.amazon.com).
 
 ## Step 1. Set up cloud provider credentials

@@ -12,7 +12,7 @@ use crate::{
     client::ServerProviderClient,
     display,
     error::{TestbedError, TestbedResult},
-    settings::Settings,
+    settings::{CloudProvider, Settings},
     ssh::SshConnection,
 };
 
@@ -29,8 +29,14 @@ pub struct Testbed<C> {
 impl<C: ServerProviderClient> Testbed<C> {
     /// Create a new testbed instance with the specified settings and client.
     pub async fn new(settings: Settings, client: C) -> TestbedResult<Self> {
-        let public_key = settings.load_ssh_public_key()?;
-        client.register_ssh_public_key(public_key).await?;
+        // Only load SSH key for cloud providers (not needed for local execution)
+        if !matches!(settings.cloud_provider, crate::settings::CloudProvider::Local) {
+            let public_key = settings.load_ssh_public_key()?;
+            client.register_ssh_public_key(public_key).await?;
+        } else {
+            // For local execution, register_ssh_public_key is a no-op, but we call it for consistency
+            client.register_ssh_public_key(String::new()).await?;
+        }
         let instances = client.list_instances().await?;
 
         Ok(Self {
@@ -139,8 +145,8 @@ impl<C: ServerProviderClient> Testbed<C> {
             }
         };
 
-        // Wait until the instances are booted.
-        if cfg!(not(test)) {
+        // Wait until the instances are booted (skip for local execution).
+        if cfg!(not(test)) && !matches!(self.settings.cloud_provider, CloudProvider::Local) {
             self.wait_until_reachable(instances.iter()).await?;
         }
         self.instances = self.client.list_instances().await?;
@@ -187,8 +193,8 @@ impl<C: ServerProviderClient> Testbed<C> {
         // Start instances.
         self.client.start_instances(available.iter()).await?;
 
-        // Wait until the instances are started.
-        if cfg!(not(test)) {
+        // Wait until the instances are started (skip for local execution).
+        if cfg!(not(test)) && !matches!(self.settings.cloud_provider, CloudProvider::Local) {
             self.wait_until_reachable(available.iter()).await?;
         }
         self.instances = self.client.list_instances().await?;
