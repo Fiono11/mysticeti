@@ -48,7 +48,7 @@ pub struct Metrics {
     pub benchmark_duration: IntCounter,
     pub latency_s: HistogramVec,
     pub latency_squared_s: CounterVec,
-    pub committed_leaders_total: IntCounterVec,
+    pub committed_blocks_total: IntCounterVec,
     pub leader_timeout_total: IntCounter,
     pub inter_block_latency_s: HistogramVec,
 
@@ -211,10 +211,10 @@ impl Metrics {
                 registry,
             )
             .unwrap(),
-            committed_leaders_total: register_int_counter_vec_with_registry!(
-                "committed_leaders_total",
-                "Total number of (direct or indirect) committed leaders per authority",
-                &["authority", "commit_type"],
+            committed_blocks_total: register_int_counter_vec_with_registry!(
+                "committed_blocks_total",
+                "Total number of committed blocks per authority",
+                &["authority", "status"],
                 registry,
             )
             .unwrap(),

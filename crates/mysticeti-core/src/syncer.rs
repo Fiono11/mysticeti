@@ -34,7 +34,7 @@ pub trait CommitObserver: Send + Sync {
     fn handle_commit(
         &mut self,
         block_store: &BlockStore,
-        committed_leaders: Vec<Data<StatementBlock>>,
+        committed_blocks: Vec<Data<StatementBlock>>,
     ) -> Vec<CommittedSubDag>;
 
     fn aggregator_state(&self) -> Bytes;

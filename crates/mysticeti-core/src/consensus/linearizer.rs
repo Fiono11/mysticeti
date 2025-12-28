@@ -75,10 +75,10 @@ impl Linearizer {
     pub fn handle_commit(
         &mut self,
         block_store: &BlockStore,
-        committed_leaders: Vec<Data<StatementBlock>>,
+        committed_blocks: Vec<Data<StatementBlock>>,
     ) -> Vec<CommittedSubDag> {
         let mut committed = vec![];
-        for leader_block in committed_leaders {
+        for leader_block in committed_blocks {
             // Collect the sub-dag generated using each of these leaders as anchor.
             let mut sub_dag = self.collect_sub_dag(block_store, leader_block);
 

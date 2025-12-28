@@ -175,7 +175,7 @@ mod smoke_tests {
         let route = prometheus::METRICS_ROUTE;
         let res = reqwest::get(format! {"http://{address}{route}"}).await?;
         let string = res.text().await?;
-        let commit = string.contains("committed_leaders_total");
+        let commit = string.contains("committed_blocks_total");
         Ok(commit)
     }
 
@@ -225,7 +225,7 @@ mod smoke_tests {
             .all_metric_addresses()
             .map(|address| address.to_owned())
             .collect();
-        let timeout = config::node_defaults::default_leader_timeout() * 5;
+        let timeout = Duration::from_secs(10); // Timeout for commit gathering
 
         tokio::select! {
             _ = await_for_commits(addresses) => (),
@@ -272,7 +272,7 @@ mod smoke_tests {
             .skip(1)
             .map(|address| address.to_owned())
             .collect();
-        let timeout = config::node_defaults::default_leader_timeout() * 5;
+        let timeout = Duration::from_secs(10); // Timeout for commit gathering
         tokio::select! {
             _ = await_for_commits(addresses) => (),
             _ = time::sleep(timeout) => panic!("Failed to gather commits within a few timeouts"),
@@ -299,7 +299,7 @@ mod smoke_tests {
             .next()
             .map(|address| address.to_owned())
             .unwrap();
-        let timeout = config::node_defaults::default_leader_timeout() * 5;
+        let timeout = Duration::from_secs(10); // Timeout for commit gathering
         tokio::select! {
             _ = await_for_commits(vec![address]) => (),
             _ = time::sleep(timeout) => panic!("Failed to gather commits within a few timeouts"),
@@ -344,7 +344,7 @@ mod smoke_tests {
             .skip(1)
             .map(|address| address.to_owned())
             .collect();
-        let timeout = config::node_defaults::default_leader_timeout() * 15;
+        let timeout = Duration::from_secs(30); // Timeout for commit gathering
 
         tokio::select! {
             _ = await_for_commits(addresses) => (),

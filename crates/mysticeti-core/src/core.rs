@@ -41,7 +41,7 @@ pub struct Core<H: BlockHandler> {
     authority: AuthorityIndex,
     threshold_clock: ThresholdClockAggregator,
     pub(crate) committee: Arc<Committee>,
-    last_commit_leader: BlockReference,
+    last_committed_block: BlockReference,
     wal_writer: WalWriter,
     block_store: BlockStore,
     pub(crate) metrics: Arc<Metrics>,
@@ -83,7 +83,7 @@ impl<H: BlockHandler> Core<H> {
             mut pending,
             state,
             unprocessed_blocks,
-            last_committed_leader,
+            last_committed_block,
             committed_blocks,
             committed_state,
         } = recovered;
@@ -142,7 +142,7 @@ impl<H: BlockHandler> Core<H> {
             authority,
             threshold_clock,
             committee,
-            last_commit_leader: last_committed_leader.unwrap_or_default(),
+            last_committed_block: last_committed_block.unwrap_or_default(),
             wal_writer,
             block_store,
             metrics,
@@ -354,17 +354,17 @@ impl<H: BlockHandler> Core<H> {
     pub fn try_commit(&mut self) -> Vec<Data<StatementBlock>> {
         let sequence: Vec<_> = self
             .committer
-            .try_commit(self.last_commit_leader)
+            .try_commit(self.last_committed_block)
             .into_iter()
             .filter_map(|leader| leader.into_decided_block())
             .collect();
 
         if let Some(last) = sequence.last() {
-            self.last_commit_leader = *last.reference();
+            self.last_committed_block = *last.reference();
         }
 
         // todo: should ideally come from execution result of epoch smart contract
-        if self.last_commit_leader.round() > self.rounds_in_epoch {
+        if self.last_committed_block.round() > self.rounds_in_epoch {
             self.epoch_manager.epoch_change_begun();
         }
 
@@ -375,7 +375,7 @@ impl<H: BlockHandler> Core<H> {
         const RETAIN_BELOW_COMMIT_ROUNDS: RoundNumber = 100;
 
         self.block_store.cleanup(
-            self.last_commit_leader
+            self.last_committed_block
                 .round()
                 .saturating_sub(RETAIN_BELOW_COMMIT_ROUNDS),
         );

@@ -8,18 +8,16 @@ use crate::{
     types::{format_authority_round, AuthorityIndex, RoundNumber, StatementBlock},
 };
 
-pub mod base_committer;
 pub mod linearizer;
 pub mod universal_committer;
 
 #[cfg(test)]
 mod tests;
 
-/// Default wave length for all committers. A longer wave_length increases the chance of committing the leader
-/// under asynchrony at the cost of latency in the common case.
+/// Default wave length for compatibility (not used in leaderless consensus).
 pub const DEFAULT_WAVE_LENGTH: RoundNumber = MINIMUM_WAVE_LENGTH;
 
-/// We need at least one leader round, one voting round, and one decision round.
+/// Minimum wave length (not used in leaderless consensus).
 pub const MINIMUM_WAVE_LENGTH: RoundNumber = 3;
 
 /// The status of every leader output by the committers. While the core only cares about committed

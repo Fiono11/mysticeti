@@ -462,7 +462,7 @@ pub struct TestCommitHandler<H = HashSet<TransactionLocator>> {
     commit_interpreter: Linearizer,
     transaction_votes: TransactionAggregator<QuorumThreshold, H>,
     committee: Arc<Committee>,
-    committed_leaders: Vec<BlockReference>,
+    committed_blocks: Vec<BlockReference>,
     // committed_dags: Vec<CommittedSubDag>,
     start_time: TimeInstant,
     transaction_time: Arc<Mutex<HashMap<TransactionLocator, TimeInstant>>>,
@@ -493,7 +493,7 @@ impl<H: ProcessedTransactionHandler<TransactionLocator>> TestCommitHandler<H> {
             commit_interpreter: Linearizer::new(),
             transaction_votes: TransactionAggregator::with_handler(handler),
             committee,
-            committed_leaders: vec![],
+            committed_blocks: vec![],
             // committed_dags: vec![],
             start_time: TimeInstant::now(),
             transaction_time,
@@ -503,8 +503,8 @@ impl<H: ProcessedTransactionHandler<TransactionLocator>> TestCommitHandler<H> {
         }
     }
 
-    pub fn committed_leaders(&self) -> &Vec<BlockReference> {
-        &self.committed_leaders
+    pub fn committed_blocks(&self) -> &Vec<BlockReference> {
+        &self.committed_blocks
     }
 
     /// Note: these metrics are used to compute performance during benchmarks.
@@ -553,16 +553,16 @@ impl<H: ProcessedTransactionHandler<TransactionLocator> + Send + Sync> CommitObs
     fn handle_commit(
         &mut self,
         block_store: &BlockStore,
-        committed_leaders: Vec<Data<StatementBlock>>,
+        committed_blocks: Vec<Data<StatementBlock>>,
     ) -> Vec<CommittedSubDag> {
         let current_timestamp = runtime::timestamp_utc();
 
         let committed = self
             .commit_interpreter
-            .handle_commit(block_store, committed_leaders);
+            .handle_commit(block_store, committed_blocks);
         let transaction_time = self.transaction_time.lock();
         for commit in &committed {
-            self.committed_leaders.push(commit.anchor);
+            self.committed_blocks.push(commit.anchor);
             for block in &commit.blocks {
                 if !self.consensus_only {
                     let processed =

@@ -264,7 +264,7 @@ pub fn check_commits<H: BlockHandler, S: SyncerSignals>(
 ) {
     let commits = syncers
         .iter()
-        .map(|state| state.commit_observer().committed_leaders());
+        .map(|state| state.commit_observer().committed_blocks());
     let zero_commit = vec![];
     let mut max_commit = &zero_commit;
     for commit in commits {

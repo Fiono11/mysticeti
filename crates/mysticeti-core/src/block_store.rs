@@ -540,8 +540,8 @@ impl OwnBlockData {
 
 #[derive(Serialize, Deserialize)]
 pub struct CommitData {
-    pub leader: BlockReference,
-    // All committed blocks, including the leader
+    pub anchor: BlockReference,
+    // All committed blocks, including the anchor
     pub sub_dag: Vec<BlockReference>,
 }
 
@@ -549,7 +549,7 @@ impl From<&CommittedSubDag> for CommitData {
     fn from(value: &CommittedSubDag) -> Self {
         let sub_dag = value.blocks.iter().map(|b| *b.reference()).collect();
         Self {
-            leader: value.anchor,
+            anchor: value.anchor,
             sub_dag,
         }
     }

@@ -494,9 +494,9 @@ mod sim_tests {
             simulated_network_syncers_with_epoch_duration(n, rounds_in_epoch);
         simulated_network.connect_all().await;
         let syncers = wait_for_epoch_to_close(network_syncers).await;
-        let canonical_commit_seq = syncers[0].commit_observer().committed_leaders().clone();
+        let canonical_commit_seq = syncers[0].commit_observer().committed_blocks().clone();
         for syncer in &syncers {
-            let commit_seq = syncer.commit_observer().committed_leaders().clone();
+            let commit_seq = syncer.commit_observer().committed_blocks().clone();
             assert_eq!(canonical_commit_seq, commit_seq);
         }
         print_stats(&syncers, &mut reporters);
@@ -518,12 +518,12 @@ mod sim_tests {
         for syncer in &syncers {
             let block_store = syncer.core().block_store();
             let committee = syncer.core().committee().clone();
-            let latest_committed_leader =
-                syncer.commit_observer().committed_leaders().last().unwrap();
+            let latest_committed_block =
+                syncer.commit_observer().committed_blocks().last().unwrap();
 
             println!(
-                "Num of Committed leaders: {:?}",
-                syncer.commit_observer().committed_leaders()
+                "Num of Committed blocks: {:?}",
+                syncer.commit_observer().committed_blocks()
             );
 
             let mut finalization_interpreter = FinalizationInterpreter::new(block_store, committee);
@@ -535,7 +535,7 @@ mod sim_tests {
                 let mut committed = false;
                 for certifying_block in certificates {
                     if block_store.linked(
-                        &block_store.get_block(*latest_committed_leader).unwrap(),
+                        &block_store.get_block(*latest_committed_block).unwrap(),
                         &block_store.get_block(certifying_block).unwrap(),
                     ) {
                         committed = true;

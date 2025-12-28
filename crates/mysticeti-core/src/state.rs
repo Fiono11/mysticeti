@@ -20,7 +20,7 @@ pub struct RecoveredState {
     pub state: Option<Bytes>,
     pub unprocessed_blocks: Vec<Data<StatementBlock>>,
 
-    pub last_committed_leader: Option<BlockReference>,
+    pub last_committed_block: Option<BlockReference>,
     pub committed_blocks: HashSet<BlockReference>,
     pub committed_state: Option<Bytes>,
 }
@@ -32,7 +32,7 @@ pub struct RecoveredStateBuilder {
     state: Option<Bytes>,
     unprocessed_blocks: Vec<Data<StatementBlock>>,
 
-    last_committed_leader: Option<BlockReference>,
+    last_committed_block: Option<BlockReference>,
     committed_blocks: HashSet<BlockReference>,
     committed_state: Option<Bytes>,
 }
@@ -66,7 +66,7 @@ impl RecoveredStateBuilder {
 
     pub fn commit_data(&mut self, commits: Vec<CommitData>, committed_state: Bytes) {
         for commit_data in commits {
-            self.last_committed_leader = Some(commit_data.leader);
+            self.last_committed_block = Some(commit_data.anchor);
             self.committed_blocks
                 .extend(commit_data.sub_dag.into_iter());
         }
@@ -85,7 +85,7 @@ impl RecoveredStateBuilder {
             block_store,
             state: self.state,
             unprocessed_blocks: self.unprocessed_blocks,
-            last_committed_leader: self.last_committed_leader,
+            last_committed_block: self.last_committed_block,
             committed_blocks: self.committed_blocks,
             committed_state: self.committed_state,
         }

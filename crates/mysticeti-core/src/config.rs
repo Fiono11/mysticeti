@@ -34,8 +34,6 @@ pub trait ImportExport: Serialize + DeserializeOwned {
 pub struct NodeParameters {
     #[serde(default = "node_defaults::default_wave_length")]
     pub wave_length: RoundNumber,
-    #[serde(default = "node_defaults::default_leader_timeout")]
-    pub leader_timeout: Duration,
     #[serde(default = "node_defaults::default_max_block_size")]
     pub max_block_size: usize,
     #[serde(default = "node_defaults::default_rounds_in_epoch")]
@@ -57,10 +55,6 @@ pub struct NodeParameters {
 pub mod node_defaults {
     pub fn default_wave_length() -> super::RoundNumber {
         3
-    }
-
-    pub fn default_leader_timeout() -> std::time::Duration {
-        std::time::Duration::from_secs(2)
     }
 
     pub fn default_max_block_size() -> usize {
@@ -100,7 +94,6 @@ impl Default for NodeParameters {
     fn default() -> Self {
         Self {
             wave_length: node_defaults::default_wave_length(),
-            leader_timeout: node_defaults::default_leader_timeout(),
             max_block_size: node_defaults::default_max_block_size(),
             rounds_in_epoch: node_defaults::default_rounds_in_epoch(),
             shutdown_grace_period: node_defaults::default_shutdown_grace_period(),
