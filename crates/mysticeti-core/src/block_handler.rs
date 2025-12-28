@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     env,
     path::Path,
     sync::Arc,
@@ -15,7 +15,10 @@ use tokio::sync::mpsc;
 
 use crate::{
     block_store::BlockStore,
-    committee::{Committee, ProcessedTransactionHandler, QuorumThreshold, TransactionAggregator},
+    committee::{
+        Committee, ProcessedTransactionHandler, QuorumThreshold, TransactionAggregator,
+        VoteRangeBuilder,
+    },
     consensus::linearizer::{CommittedSubDag, Linearizer},
     data::Data,
     log::TransactionLog,
@@ -24,12 +27,8 @@ use crate::{
     syncer::CommitObserver,
     transactions_generator::TransactionGenerator,
     types::{
-        AuthorityIndex,
-        BaseStatement,
-        BlockReference,
-        StatementBlock,
-        Transaction,
-        TransactionLocator,
+        AuthorityIndex, BaseStatement, BlockReference, StatementBlock, Transaction,
+        TransactionLocator, TransactionLocatorRange,
     },
 };
 
@@ -47,6 +46,12 @@ pub trait BlockHandler: Send + Sync {
     fn recover_state(&mut self, _state: &Bytes);
 
     fn cleanup(&self) {}
+
+    /// Get pending votes that should be included in the next block (for leaderless voting).
+    /// Returns empty vector if not applicable or no votes pending.
+    fn get_pending_votes(&mut self) -> Vec<BaseStatement> {
+        vec![]
+    }
 }
 
 const REAL_BLOCK_HANDLER_TXN_SIZE: usize = 512;
@@ -70,6 +75,11 @@ pub struct RealBlockHandler {
     receiver: mpsc::Receiver<Vec<Transaction>>,
     pending_transactions: usize,
     consensus_only: bool,
+    // Leaderless voting: track transactions we've seen but haven't voted on yet
+    pending_votes: VecDeque<TransactionLocator>,
+    last_vote_batch_time: TimeInstant,
+    vote_batch_interval: Duration,
+    vote_batch_tx_count: usize,
 }
 
 /// The max number of transactions per block.
@@ -84,6 +94,8 @@ impl RealBlockHandler {
         block_store: BlockStore,
         metrics: Arc<Metrics>,
         consensus_only: bool,
+        vote_batch_interval_ms: u64,
+        vote_batch_tx_count: usize,
     ) -> (Self, mpsc::Sender<Vec<Transaction>>) {
         let (sender, receiver) = mpsc::channel(1024);
         let transaction_log = TransactionLog::start(certified_transactions_log_path)
@@ -99,8 +111,80 @@ impl RealBlockHandler {
             receiver,
             pending_transactions: 0, // todo - need to initialize correctly when loaded from disk
             consensus_only,
+            pending_votes: VecDeque::new(),
+            last_vote_batch_time: TimeInstant::now(),
+            vote_batch_interval: Duration::from_millis(vote_batch_interval_ms),
+            vote_batch_tx_count,
         };
         (this, sender)
+    }
+
+    /// Get votes that should be included in the next block based on time and count thresholds.
+    /// Returns VoteRange statements for batches of transactions.
+    fn get_pending_votes_impl(&mut self) -> Vec<BaseStatement> {
+        let now = TimeInstant::now();
+        let time_elapsed = self.last_vote_batch_time.elapsed();
+        let should_create_votes = time_elapsed >= self.vote_batch_interval
+            || self.pending_votes.len() >= self.vote_batch_tx_count;
+
+        if !should_create_votes || self.pending_votes.is_empty() {
+            return vec![];
+        }
+
+        // Create VoteRange statements for batches of transactions
+        let mut votes = vec![];
+        let mut vote_range_builder = VoteRangeBuilder::default();
+        let mut current_block_ref: Option<BlockReference> = None;
+        let mut current_offset_start: Option<u64> = None;
+
+        while let Some(locator) = self.pending_votes.pop_front() {
+            let block_ref = *locator.block();
+            let offset = locator.offset();
+
+            if current_block_ref != Some(block_ref) {
+                // Finish previous range if any
+                if let (Some(block_ref), Some(start)) = (current_block_ref, current_offset_start) {
+                    if let Some(range) = vote_range_builder.finish() {
+                        let range = TransactionLocatorRange::new(block_ref, range);
+                        votes.push(BaseStatement::VoteRange(range));
+                    }
+                    vote_range_builder = VoteRangeBuilder::default();
+                }
+                current_block_ref = Some(block_ref);
+                current_offset_start = Some(offset);
+            }
+
+            if let Some(range) = vote_range_builder.add(offset) {
+                // Range completed, create VoteRange
+                if let Some(block_ref) = current_block_ref {
+                    let range = TransactionLocatorRange::new(block_ref, range);
+                    votes.push(BaseStatement::VoteRange(range));
+                }
+                current_offset_start = Some(offset);
+            }
+        }
+
+        // Finish last range if any
+        if let (Some(block_ref), Some(_)) = (current_block_ref, current_offset_start) {
+            if let Some(range) = vote_range_builder.finish() {
+                let range = TransactionLocatorRange::new(block_ref, range);
+                votes.push(BaseStatement::VoteRange(range));
+            }
+        }
+
+        if !votes.is_empty() {
+            self.last_vote_batch_time = now;
+        }
+
+        votes
+    }
+
+    /// Track a transaction that we've seen (shared) and should vote on.
+    fn track_transaction_for_vote(&mut self, locator: TransactionLocator) {
+        // Only track if we haven't already voted on it
+        // Note: We can't easily check if it's processed without the handler, so we'll track all
+        // The TransactionAggregator will handle duplicates
+        self.pending_votes.push_back(locator);
     }
 }
 
@@ -165,6 +249,19 @@ impl BlockHandler for RealBlockHandler {
                 }
             }
         }
+        // Collect transactions to track for voting first
+        let mut transactions_to_track = vec![];
+        for block in blocks {
+            for (locator, _) in block.shared_transactions() {
+                transactions_to_track.push(locator);
+            }
+        }
+
+        // Track transactions for voting
+        for locator in transactions_to_track {
+            self.track_transaction_for_vote(locator);
+        }
+
         let transaction_time = self.transaction_time.lock();
         for block in blocks {
             let response_option: Option<&mut Vec<BaseStatement>> = if require_response {
@@ -195,16 +292,35 @@ impl BlockHandler for RealBlockHandler {
     fn handle_proposal(&mut self, block: &Data<StatementBlock>) {
         // todo - this is not super efficient
         self.pending_transactions -= block.shared_transactions().count();
-        let mut transaction_time = self.transaction_time.lock();
-        for (locator, _) in block.shared_transactions() {
-            transaction_time.insert(locator, TimeInstant::now());
+
+        // Collect locators first
+        let locators: Vec<_> = block
+            .shared_transactions()
+            .map(|(locator, _)| locator)
+            .collect();
+
+        {
+            let mut transaction_time = self.transaction_time.lock();
+            for locator in &locators {
+                transaction_time.insert(*locator, TimeInstant::now());
+            }
         }
+
+        // Track our own shared transactions for voting (after releasing the lock)
+        for locator in locators {
+            self.track_transaction_for_vote(locator);
+        }
+
         if !self.consensus_only {
             for range in block.shared_ranges() {
                 self.transaction_votes
                     .register(range, self.authority, &self.committee);
             }
         }
+    }
+
+    fn get_pending_votes(&mut self) -> Vec<BaseStatement> {
+        self.get_pending_votes_impl()
     }
 
     fn state(&self) -> Bytes {

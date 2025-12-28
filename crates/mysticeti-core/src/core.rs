@@ -13,12 +13,7 @@ use crate::{
     block_handler::BlockHandler,
     block_manager::BlockManager,
     block_store::{
-        BlockStore,
-        BlockWriter,
-        CommitData,
-        OwnBlockData,
-        WAL_ENTRY_COMMIT,
-        WAL_ENTRY_PAYLOAD,
+        BlockStore, BlockWriter, CommitData, OwnBlockData, WAL_ENTRY_COMMIT, WAL_ENTRY_PAYLOAD,
         WAL_ENTRY_STATE,
     },
     committee::Committee,
@@ -132,16 +127,11 @@ impl<H: BlockHandler> Core<H> {
 
         let committer =
             UniversalCommitterBuilder::new(committee.clone(), block_store.clone(), metrics.clone())
-                .with_number_of_leaders(public_config.parameters.number_of_leaders)
                 .with_pipeline(public_config.parameters.enable_pipelining)
                 .build();
         tracing::info!(
             "Pipeline enabled: {}",
             public_config.parameters.enable_pipelining
-        );
-        tracing::info!(
-            "Number of leaders: {}",
-            public_config.parameters.number_of_leaders
         );
 
         let mut this = Self {
@@ -272,6 +262,12 @@ impl<H: BlockHandler> Core<H> {
             }
         }
 
+        // Add pending votes from block handler (for leaderless voting)
+        let pending_votes = self.block_handler.get_pending_votes();
+        if !self.epoch_changing() {
+            statements.extend(pending_votes);
+        }
+
         assert!(!includes.is_empty());
         let time_ns = timestamp_utc().as_nanos();
         let block = StatementBlock::new_with_signer(
@@ -384,23 +380,21 @@ impl<H: BlockHandler> Core<H> {
     /// try_new_block might still return None if threshold clock is not ready
     ///
     /// The algorithm to calling is roughly: if timeout || commit_ready_new_block then try_new_block(..)
+    ///
+    /// For leaderless consensus, we create blocks when the threshold clock indicates we're ready.
+    /// The threshold clock ensures we have enough blocks from previous rounds to proceed safely.
     pub fn ready_new_block(
         &self,
-        period: u64,
-        connected_authorities: &HashSet<AuthorityIndex>,
+        _period: u64,
+        _connected_authorities: &HashSet<AuthorityIndex>,
     ) -> bool {
-        let quorum_round = self.threshold_clock.get_round();
+        // For leaderless consensus, we can create blocks when threshold clock is ready
+        // The threshold clock ensures we have quorum of blocks from previous rounds
+        let clock_round = self.threshold_clock.get_round();
+        let last_proposed = self.last_proposed();
 
-        // Leader round we check if we have a leader block
-        if quorum_round > self.last_commit_leader.round().max(period - 1) {
-            let leader_round = quorum_round - 1;
-            let mut leaders = self.committer.get_leaders(leader_round);
-            leaders.retain(|leader| connected_authorities.contains(leader));
-            self.block_store
-                .all_blocks_exists_at_authority_round(&leaders, leader_round)
-        } else {
-            false
-        }
+        // Ready if we can propose a new round
+        clock_round > last_proposed
     }
 
     pub fn handle_committed_subdag(

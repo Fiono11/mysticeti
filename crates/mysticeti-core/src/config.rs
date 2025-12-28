@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    fs,
-    io,
+    fs, io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     time::Duration,
@@ -43,14 +42,16 @@ pub struct NodeParameters {
     pub rounds_in_epoch: RoundNumber,
     #[serde(default = "node_defaults::default_shutdown_grace_period")]
     pub shutdown_grace_period: Duration,
-    #[serde(default = "node_defaults::default_number_of_leaders")]
-    pub number_of_leaders: usize,
     #[serde(default = "node_defaults::default_enable_pipelining")]
     pub enable_pipelining: bool,
     #[serde(default = "node_defaults::default_consensus_only")]
     pub consensus_only: bool,
     #[serde(default = "node_defaults::default_enable_synchronizer")]
     pub enable_synchronizer: bool,
+    #[serde(default = "node_defaults::default_vote_batch_interval_ms")]
+    pub vote_batch_interval_ms: u64,
+    #[serde(default = "node_defaults::default_vote_batch_tx_count")]
+    pub vote_batch_tx_count: usize,
 }
 
 pub mod node_defaults {
@@ -74,10 +75,6 @@ pub mod node_defaults {
         std::time::Duration::from_secs(2)
     }
 
-    pub fn default_number_of_leaders() -> usize {
-        2
-    }
-
     pub fn default_enable_pipelining() -> bool {
         true
     }
@@ -89,6 +86,14 @@ pub mod node_defaults {
     pub fn default_enable_synchronizer() -> bool {
         false
     }
+
+    pub fn default_vote_batch_interval_ms() -> u64 {
+        100 // 100ms default
+    }
+
+    pub fn default_vote_batch_tx_count() -> usize {
+        100 // Vote when 100 transactions are received
+    }
 }
 
 impl Default for NodeParameters {
@@ -99,10 +104,11 @@ impl Default for NodeParameters {
             max_block_size: node_defaults::default_max_block_size(),
             rounds_in_epoch: node_defaults::default_rounds_in_epoch(),
             shutdown_grace_period: node_defaults::default_shutdown_grace_period(),
-            number_of_leaders: node_defaults::default_number_of_leaders(),
             enable_pipelining: node_defaults::default_enable_pipelining(),
             consensus_only: node_defaults::default_consensus_only(),
             enable_synchronizer: node_defaults::default_enable_synchronizer(),
+            vote_batch_interval_ms: node_defaults::default_vote_batch_interval_ms(),
+            vote_batch_tx_count: node_defaults::default_vote_batch_tx_count(),
         }
     }
 }

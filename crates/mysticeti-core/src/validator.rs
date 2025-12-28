@@ -81,6 +81,8 @@ impl Validator {
             recovered.block_store.clone(),
             metrics.clone(),
             public_config.parameters.consensus_only,
+            public_config.parameters.vote_batch_interval_ms,
+            public_config.parameters.vote_batch_tx_count,
         );
 
         TransactionGenerator::start(

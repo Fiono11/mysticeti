@@ -12,16 +12,13 @@ use crate::{
     types::{format_authority_round, AuthorityIndex, BlockReference, RoundNumber, StatementBlock},
 };
 
-/// The consensus protocol operates in 'waves'. Each wave is composed of a leader round, at least one
+/// The consensus protocol operates in 'waves'. Each wave is composed of at least one
 /// voting round, and one decision round.
 type WaveNumber = u64;
 
 pub struct BaseCommitterOptions {
     /// The length of a wave (minimum 3)
     pub wave_length: u64,
-    /// The offset used in the leader-election protocol. THis is used by the multi-committer to ensure
-    /// that each [`BaseCommitter`] instance elects a different leader.
-    pub leader_offset: u64,
     /// The offset of the first wave. This is used by the pipelined committer to ensure that each
     /// [`BaseCommitter`] instances operates on a different view of the dag.
     pub round_offset: u64,
@@ -31,7 +28,6 @@ impl Default for BaseCommitterOptions {
     fn default() -> Self {
         Self {
             wave_length: DEFAULT_WAVE_LENGTH,
-            leader_offset: 0,
             round_offset: 0,
         }
     }
@@ -69,30 +65,11 @@ impl BaseCommitter {
         round.saturating_sub(self.options.round_offset) / self.options.wave_length
     }
 
-    /// Return the leader round of the specified wave number. The leader round is always the first
-    /// round of the wave.
-    fn leader_round(&self, wave: WaveNumber) -> RoundNumber {
-        wave * self.options.wave_length + self.options.round_offset
-    }
-
     /// Return the decision round of the specified wave. The decision round is always the last
     /// round of the wave.
     fn decision_round(&self, wave: WaveNumber) -> RoundNumber {
         let wave_length = self.options.wave_length;
         wave * wave_length + wave_length - 1 + self.options.round_offset
-    }
-
-    /// The leader-elect protocol is offset by `leader_offset` to ensure that different committers
-    /// with different leader offsets elect different leaders for the same round number. This function
-    /// returns `None` if there are no leaders for the specified round.
-    pub fn elect_leader(&self, round: RoundNumber) -> Option<AuthorityIndex> {
-        let wave = self.wave_number(round);
-        if self.leader_round(wave) != round {
-            return None;
-        }
-
-        let offset = self.options.leader_offset as RoundNumber;
-        Some(self.committee.elect_leader(round + offset))
     }
 
     /// Find which block is supported at (author, round) by the given block.
@@ -335,10 +312,6 @@ impl BaseCommitter {
 
 impl Display for BaseCommitter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Committer-L{}-R{}",
-            self.options.leader_offset, self.options.round_offset
-        )
+        write!(f, "Committer-R{}", self.options.round_offset)
     }
 }
