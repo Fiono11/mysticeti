@@ -127,6 +127,14 @@ impl RealBlockHandler {
         let should_create_votes = time_elapsed >= self.vote_batch_interval
             || self.pending_votes.len() >= self.vote_batch_tx_count;
 
+        tracing::debug!(
+            "get_pending_votes: pending={}, time_elapsed={:?}, interval={:?}, should_create={}",
+            self.pending_votes.len(),
+            time_elapsed,
+            self.vote_batch_interval,
+            should_create_votes
+        );
+
         if !should_create_votes || self.pending_votes.is_empty() {
             return vec![];
         }
@@ -264,15 +272,14 @@ impl BlockHandler for RealBlockHandler {
 
         let transaction_time = self.transaction_time.lock();
         for block in blocks {
-            let response_option: Option<&mut Vec<BaseStatement>> = if require_response {
-                Some(&mut response)
-            } else {
-                None
-            };
+            // For leaderless voting, we don't automatically create votes when processing blocks.
+            // Votes are created via the batching mechanism (get_pending_votes).
+            // We still need to register transactions and process votes from other validators.
+            // Pass None for response to disable automatic vote creation.
             if !self.consensus_only {
                 let processed =
                     self.transaction_votes
-                        .process_block(block, response_option, &self.committee);
+                        .process_block(block, None, &self.committee);
                 for processed_locator in processed {
                     let block_creation = transaction_time.get(&processed_locator);
                     let transaction = self

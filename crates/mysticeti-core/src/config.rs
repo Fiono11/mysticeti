@@ -88,11 +88,11 @@ pub mod node_defaults {
     }
 
     pub fn default_vote_batch_interval_ms() -> u64 {
-        100 // 100ms default
+        50 // 50ms default - lower for faster vote creation in leaderless voting
     }
 
     pub fn default_vote_batch_tx_count() -> usize {
-        100 // Vote when 100 transactions are received
+        10 // Vote when 10 transactions are received - lower threshold for testing
     }
 }
 

@@ -264,6 +264,13 @@ impl<H: BlockHandler> Core<H> {
 
         // Add pending votes from block handler (for leaderless voting)
         let pending_votes = self.block_handler.get_pending_votes();
+        if !pending_votes.is_empty() {
+            tracing::debug!(
+                "Including {} vote statements in block at round {}",
+                pending_votes.len(),
+                clock_round
+            );
+        }
         if !self.epoch_changing() {
             statements.extend(pending_votes);
         }
