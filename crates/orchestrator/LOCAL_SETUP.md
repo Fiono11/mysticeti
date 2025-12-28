@@ -11,6 +11,45 @@ The orchestrator supports local execution through a `local` cloud provider. This
 1. **Rust and dependencies**: Make sure you have Rust installed and can build the project
 2. **Shell access**: A Unix-like shell (sh) is required for command execution
 
+## Quick Start: Using the Script
+
+The easiest way to run local benchmarks is using the provided script:
+
+```bash
+# Quick local test (default: 4 nodes, 200 tx/s)
+./scripts/local-benchmark.sh
+
+# Run with custom parameters
+./scripts/local-benchmark.sh --committee 2 --loads 100
+
+# Run with multiple loads
+./scripts/local-benchmark.sh --committee 4 --loads 100 --loads 200 --loads 500
+
+# Use local project code instead of cloning from git (recommended for development)
+./scripts/local-benchmark.sh --committee 4 --loads 200 --use-local-code
+
+# Skip update and config for faster iteration
+./scripts/local-benchmark.sh --committee 4 --loads 200 --skip-update --skip-config
+```
+
+The script automatically:
+- Copies `settings-local.yml` to `settings.yml`
+- Verifies the configuration
+- Optionally sets up a symlink to use local code (with `--use-local-code`)
+- Optionally deploys instances
+- Runs the benchmark with your specified parameters
+
+**Tip:** Use `--use-local-code` to test your local changes without cloning from git. This creates a symlink so the orchestrator uses your current project directory.
+
+For more details, run:
+```bash
+./scripts/local-benchmark.sh --help
+```
+
+## Manual Setup: Step-by-Step Guide
+
+If you prefer to run commands manually or need more control, follow these steps:
+
 ## Step 1: Configure Local Settings
 
 1. **Copy the local settings template**:
@@ -86,6 +125,18 @@ If you see port conflicts, you may need to:
 - Reduce the number of instances
 
 ## Example: Quick Local Test
+
+### Using the Script (Recommended)
+
+```bash
+# Quick test with 2 nodes and 100 tx/s (uses local code)
+./scripts/local-benchmark.sh --committee 2 --loads 100 --use-local-code
+
+# Or without local code (clones from git)
+./scripts/local-benchmark.sh --committee 2 --loads 100 --skip-update
+```
+
+### Manual Method
 
 ```bash
 # 1. Use local settings (no SSH setup needed)

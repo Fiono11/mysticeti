@@ -14,7 +14,7 @@ regions:
 # Specs are not used for local execution, but must be set
 specs: local
 repository:
-  url: https://github.com/Fiono11/mysticeti.git
+  url: https://github.com/asonnino/mysticeti.git
   commit: rai
 # Working directory on localhost where the code will be cloned and run
 working_dir: "${HOME}/mysticeti-working"
