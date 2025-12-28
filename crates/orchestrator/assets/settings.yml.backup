@@ -1,0 +1,33 @@
+---
+# Local execution settings for running benchmarks on your local machine
+# This configuration allows you to run benchmarks without cloud instances.
+
+testbed_id: "${USER}-local-mysticeti"
+cloud_provider: local
+# For local execution, token_file is not used but must be set
+token_file: "/dev/null"
+# For local execution, ssh_private_key_file is not used but must be set
+ssh_private_key_file: "${HOME}/.ssh/id_rsa"
+# Regions are not used for local execution, but must be set
+regions:
+  - local
+# Specs are not used for local execution, but must be set
+specs: local
+repository:
+  url: https://github.com/asonnino/mysticeti.git
+  commit: main
+# Working directory on localhost where the code will be cloned and run
+working_dir: "${HOME}/mysticeti-working"
+# Directory where benchmark results will be saved
+results_dir: "./results"
+# Directory where logs will be downloaded
+logs_dir: "./logs"
+# Benchmark duration in seconds (0 = run indefinitely)
+benchmark_duration: 60
+# Whether to use monitoring (Prometheus/Grafana)
+monitoring: false
+# Number of dedicated client instances (0 = collocate with nodes)
+dedicated_clients: 0
+# Whether to process and download logs
+log_processing: false
+

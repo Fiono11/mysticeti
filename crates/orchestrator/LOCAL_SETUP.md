@@ -11,6 +11,39 @@ The orchestrator supports local execution through a `local` cloud provider. This
 1. **Rust and dependencies**: Make sure you have Rust installed and can build the project
 2. **Shell access**: A Unix-like shell (sh) is required for command execution
 
+## Quick Start: Using the Script
+
+The easiest way to run local benchmarks is using the provided script:
+
+```bash
+./scripts/local-benchmark.sh
+```
+
+This will automatically:
+- Copy `settings-local.yml` to `settings.yml`
+- Run a benchmark with default settings (4 committee nodes, 200 tx/s)
+
+You can customize the script behavior with options:
+
+```bash
+# Run with custom committee size and load
+./scripts/local-benchmark.sh -c 2 -l 100
+
+# Skip testbed update (faster for repeated runs)
+./scripts/local-benchmark.sh -c 4 -l 200 -u
+
+# Deploy instances first, then run benchmark
+./scripts/local-benchmark.sh -d -i 4 -c 4 -l 200
+
+# Run multiple loads
+./scripts/local-benchmark.sh -c 4 -l "100,200,500"
+
+# See all options
+./scripts/local-benchmark.sh --help
+```
+
+For more control, you can follow the manual steps below.
+
 ## Step 1: Configure Local Settings
 
 1. **Copy the local settings template**:
@@ -87,6 +120,12 @@ If you see port conflicts, you may need to:
 
 ## Example: Quick Local Test
 
+**Using the script (recommended):**
+```bash
+./scripts/local-benchmark.sh -c 2 -l 100 -u
+```
+
+**Or manually:**
 ```bash
 # 1. Use local settings (no SSH setup needed)
 cp crates/orchestrator/assets/settings-local.yml crates/orchestrator/assets/settings.yml
